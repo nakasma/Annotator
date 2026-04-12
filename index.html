@@ -390,21 +390,32 @@
         // --- Initialization ---
         window.onload = function() {
             // Fabric.js の堅牢性を高めるパッチ:
-            // Canvas未追加状態でのキャッシュ生成時に getRetinaScaling() の未定義エラーを防ぐ
-            if (fabric && fabric.Object && fabric.Object.prototype._getCacheCanvasDimensions) {
-                const origGetCacheCanvasDimensions = fabric.Object.prototype._getCacheCanvasDimensions;
-                fabric.Object.prototype._getCacheCanvasDimensions = function() {
-                    if (!this.canvas) {
-                        this.canvas = { 
-                            getRetinaScaling: () => fabric.devicePixelRatio || 1,
-                            getZoom: () => 1
+            // Canvas未追加状態でのキャッシュ生成や処理時に getRetinaScaling() の未定義エラーを防ぐため
+            // 処理中のみ一時的な軽量ダミーCanvasオブジェクトを提供する
+            if (fabric && fabric.Object) {
+                const patchMethods = ['_getCacheCanvasDimensions', '_updateCacheCanvas', 'drawCacheOnCanvas'];
+                patchMethods.forEach(method => {
+                    if (fabric.Object.prototype[method]) {
+                        const orig = fabric.Object.prototype[method];
+                        fabric.Object.prototype[method] = function(...args) {
+                            let mocked = false;
+                            if (!this.canvas) {
+                                this.canvas = { 
+                                    getRetinaScaling: () => fabric.devicePixelRatio || 1,
+                                    getZoom: () => 1
+                                };
+                                mocked = true;
+                            }
+                            try {
+                                return orig.apply(this, args);
+                            } finally {
+                                if (mocked) {
+                                    delete this.canvas;
+                                }
+                            }
                         };
-                        const res = origGetCacheCanvasDimensions.call(this);
-                        delete this.canvas;
-                        return res;
                     }
-                    return origGetCacheCanvasDimensions.call(this);
-                };
+                });
             }
 
             initCanvas();
