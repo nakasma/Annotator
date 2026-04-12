@@ -1,0 +1,2017 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Annotator</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fabric.js (Canvas Library) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            background-color: #f3f4f6;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden; /* Prevent body scroll */
+        }
+        
+        /* メインエリアをスクロール可能に */
+        #main-area {
+            overflow: auto;
+            background-color: #e5e7eb; /* スクロール領域の背景色 */
+        }
+
+        /* キャンバスラッパーを固定巨大サイズに */
+        #canvas-wrapper {
+            width: 3000px;
+            height: 2200px;
+            position: relative;
+            background-color: #ffffff;
+            /* 市松模様を削除して白一色に変更 */
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            margin: auto;
+        }
+
+        .tool-btn {
+            transition: all 0.2s;
+        }
+        .tool-btn.active {
+            background-color: #eff6ff;
+            color: #2563eb;
+            border-color: #2563eb;
+        }
+        
+        /* 透明色を表す市松模様（パレット用） */
+        .transparent-pattern {
+            background-color: #ffffff !important;
+            background-image: 
+                linear-gradient(45deg, #cbd5e1 25%, transparent 25%), 
+                linear-gradient(-45deg, #cbd5e1 25%, transparent 25%), 
+                linear-gradient(45deg, transparent 75%, #cbd5e1 75%), 
+                linear-gradient(-45deg, transparent 75%, #cbd5e1 75%);
+            background-size: 8px 8px;
+            background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+        }
+
+        /* パレット内のカラードット */
+        .color-dot {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 1px solid #d1d5db;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .color-dot:hover {
+            transform: scale(1.2);
+        }
+
+        /* モーダルアニメーション */
+        .modal-enter {
+            opacity: 0;
+            transform: scale(0.95);
+        }
+        .modal-enter-active {
+            opacity: 1;
+            transform: scale(1);
+            transition: opacity 0.2s, transform 0.2s;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+
+    <!-- Header / Toolbar -->
+    <header class="bg-white border-b border-gray-200 px-4 py-2 shadow-sm z-10 flex items-center justify-between shrink-0 h-16">
+        
+        <!-- Logo / Orientation Switcher -->
+        <div class="flex items-center gap-3 mr-4">
+            <!-- Icon: hidden on smaller screens, visible only on XL screens to save space -->
+            <div class="bg-blue-600 text-white p-1.5 rounded-lg flex-shrink-0 hidden xl:block">
+                <i class="fa-solid fa-pen-nib"></i>
+            </div>
+            
+            <!-- Orientation Toggle Buttons -->
+            <div class="flex flex-col gap-0.5 relative">
+                <span class="text-[10px] font-bold text-gray-400 uppercase leading-none">出力範囲</span>
+                
+                <!-- Desktop: Expanded Buttons (Visible on LG and up) -->
+                <!-- 画面幅が小さくなった時に折りたたむため、lg:flex に設定 -->
+                <div class="hidden lg:flex bg-gray-100 p-1 rounded-lg gap-1">
+                    <button onclick="setOrientation('landscape')" id="btn-landscape" class="px-2 py-1 rounded text-xs font-bold text-blue-600 bg-white shadow-sm transition flex items-center gap-1" title="A4 横">
+                        <i class="fa-regular fa-file fa-rotate-90"></i> 横
+                    </button>
+                    <button onclick="setOrientation('portrait')" id="btn-portrait" class="px-2 py-1 rounded text-xs font-bold text-gray-500 hover:bg-white/50 transition flex items-center gap-1" title="A4 縦">
+                        <i class="fa-regular fa-file"></i> 縦
+                    </button>
+                    <button onclick="setOrientation('fit')" id="btn-fit" class="px-2 py-1 rounded text-xs font-bold text-gray-500 hover:bg-white/50 transition flex items-center gap-1" title="図形範囲に合わせる">
+                        <i class="fa-solid fa-crop-simple"></i> 自動
+                    </button>
+                </div>
+
+                <!-- Mobile/Tablet: Collapsed Dropdown (Visible below LG) -->
+                <div class="lg:hidden relative">
+                    <button onclick="toggleOrientationDropdown(event)" id="btn-orientation-dropdown" class="bg-gray-100 px-2 py-1 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-200 transition flex items-center gap-2 min-w-[80px] justify-between border border-transparent focus:border-blue-300">
+                        <span id="orientation-label" class="flex items-center gap-1"><i class="fa-regular fa-file fa-rotate-90"></i> 横</span>
+                        <i class="fa-solid fa-chevron-down text-[10px] text-gray-400"></i>
+                    </button>
+                    
+                    <div id="orientation-menu" class="hidden absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl p-1 flex flex-col gap-1 z-[100] w-32">
+                        <button onclick="setOrientation('landscape')" class="text-left px-2 py-1.5 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                            <i class="fa-regular fa-file fa-rotate-90 w-4 text-center"></i> A4 横
+                        </button>
+                        <button onclick="setOrientation('portrait')" class="text-left px-2 py-1.5 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                            <i class="fa-regular fa-file w-4 text-center"></i> A4 縦
+                        </button>
+                        <button onclick="setOrientation('fit')" class="text-left px-2 py-1.5 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                            <i class="fa-solid fa-crop-simple w-4 text-center"></i> 自動
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Tools (Scrollable Wrapper) -->
+        <div class="flex-auto min-w-0 overflow-x-auto mr-4">
+            <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-max">
+                <button onclick="setMode('select')" id="btn-select" class="tool-btn active w-9 h-9 rounded flex items-center justify-center text-gray-600 hover:bg-gray-200" title="選択 / 移動">
+                    <i class="fa-solid fa-arrow-pointer"></i>
+                </button>
+                <div class="w-px h-5 bg-gray-300 mx-1"></div>
+                <button onclick="setMode('rect')" id="btn-rect" class="tool-btn w-9 h-9 rounded flex items-center justify-center text-gray-600 hover:bg-gray-200" title="四角形">
+                    <i class="fa-regular fa-square"></i>
+                </button>
+                <button onclick="setMode('circle')" id="btn-circle" class="tool-btn w-9 h-9 rounded flex items-center justify-center text-gray-600 hover:bg-gray-200" title="円 (楕円)">
+                    <i class="fa-regular fa-circle"></i>
+                </button>
+                <button onclick="setMode('polygon')" id="btn-polygon" class="tool-btn w-9 h-9 rounded flex items-center justify-center text-gray-600 hover:bg-gray-200" title="多角形 (クリックで頂点追加 / EnterかWクリックで完了)">
+                    <i class="fa-solid fa-draw-polygon"></i>
+                </button>
+                <button onclick="setMode('arrow')" id="btn-arrow" class="tool-btn w-9 h-9 rounded flex items-center justify-center text-gray-600 hover:bg-gray-200" title="矢印">
+                    <i class="fa-solid fa-arrow-right-long"></i>
+                </button>
+                <button onclick="setMode('text')" id="btn-text" class="tool-btn w-9 h-9 rounded flex items-center justify-center text-gray-600 hover:bg-gray-200" title="テキスト">
+                    <i class="fa-solid fa-font"></i>
+                </button>
+                <button onclick="setMode('stamp')" id="btn-stamp" class="tool-btn w-9 h-9 rounded flex items-center justify-center text-gray-600 hover:bg-gray-200" title="連番スタンプ">
+                    <div class="w-5 h-5 rounded-full border-2 border-current flex items-center justify-center text-xs font-bold">1</div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Settings (Color/Width) (Scrollable Wrapper) -->
+        <div class="flex-auto min-w-0 overflow-x-auto">
+            <div class="flex items-center gap-4 w-max">
+                <!-- Stroke Colors (Dropdown) -->
+                <div class="flex flex-col gap-0.5 relative">
+                    <span class="text-[10px] font-bold text-gray-400 uppercase leading-none">Line</span>
+                    <!-- Dropdown Container -->
+                    <div id="stroke-palette" class="relative">
+                        <!-- JS will insert button and dropdown here -->
+                    </div>
+                </div>
+
+                <div class="w-px h-8 bg-gray-200"></div>
+
+                <!-- Fill Colors (Dropdown) -->
+                <div class="flex flex-col gap-0.5 relative">
+                    <span class="text-[10px] font-bold text-gray-400 uppercase leading-none">Fill</span>
+                    <!-- Dropdown Container -->
+                    <div id="fill-palette" class="relative">
+                        <!-- JS will insert button and dropdown here -->
+                    </div>
+                </div>
+                
+                <div class="w-px h-8 bg-gray-200"></div>
+
+                <!-- Stroke Width -->
+                <div class="flex flex-col justify-center gap-0.5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold text-gray-400 uppercase leading-none">Line</span>
+                        <span id="width-value" class="text-[10px] text-gray-600 font-mono">2</span>
+                    </div>
+                    <input type="range" id="width-slider" min="2" max="20" value="2" class="w-20 accent-blue-600 cursor-pointer h-2">
+                </div>
+
+                <div class="w-px h-8 bg-gray-200"></div>
+
+                <!-- Font Size -->
+                <div class="flex flex-col justify-center gap-0.5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold text-gray-400 uppercase leading-none">Font</span>
+                        <span id="font-value" class="text-[10px] text-gray-600 font-mono">24</span>
+                    </div>
+                    <input type="range" id="font-slider" min="8" max="80" value="24" class="w-20 accent-blue-600 cursor-pointer h-2">
+                </div>
+
+                <div class="w-px h-8 bg-gray-200"></div>
+
+                <!-- Layer Controls -->
+                <div class="flex flex-col justify-center gap-0.5">
+                    <span class="text-[10px] font-bold text-gray-400 uppercase leading-none text-center">Layer</span>
+                    <div class="flex items-center gap-1">
+                        <button onclick="bringSelectedToFront()" class="w-7 h-7 rounded hover:bg-gray-200 text-gray-600 flex items-center justify-center transition" title="最前面へ移動">
+                            <i class="fa-solid fa-angles-up"></i>
+                        </button>
+                        <button onclick="sendSelectedToBack()" class="w-7 h-7 rounded hover:bg-gray-200 text-gray-600 flex items-center justify-center transition" title="最背面へ移動">
+                            <i class="fa-solid fa-angles-down"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex items-center gap-2 ml-4">
+            <button onclick="undo()" class="text-gray-500 hover:bg-gray-100 w-9 h-9 rounded flex items-center justify-center transition" title="元に戻す (Ctrl+Z)">
+                <i class="fa-solid fa-rotate-left"></i>
+            </button>
+            <div class="w-px h-5 bg-gray-300 mx-1"></div>
+            <button onclick="deleteSelected()" class="text-red-500 hover:bg-red-50 w-9 h-9 rounded flex items-center justify-center transition" title="削除 (Deleteキー)">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+            <div class="w-px h-5 bg-gray-300 mx-1"></div>
+            <button onclick="copyToClipboard()" id="copy-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm transition flex items-center gap-2">
+                <i class="fa-regular fa-copy"></i>
+                <span class="hidden sm:inline">コピー</span>
+            </button>
+            <button onclick="downloadImage()" class="bg-gray-600 hover:bg-gray-700 text-white w-9 h-9 rounded-lg flex items-center justify-center shadow-sm transition" title="ダウンロード">
+                <i class="fa-solid fa-download"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Canvas Area (Full Screen) -->
+    <main class="flex-1 relative" id="main-area">
+        <div id="canvas-wrapper">
+            <canvas id="c"></canvas>
+            
+            <!-- Empty State Helper -->
+            <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-gray-400">
+                <i class="fa-regular fa-image text-4xl mb-3 opacity-50"></i>
+                <p class="text-lg font-medium">Ctrl + V で画像を貼り付け</p>
+                <p class="text-sm opacity-70">またはドラッグ＆ドロップ</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Copy Modal (Fallback) -->
+    <div id="copy-modal" class="fixed inset-0 bg-black/50 z-[100] hidden flex items-center justify-center backdrop-blur-sm transition-opacity duration-200">
+        <div class="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full mx-4 flex flex-col gap-4 max-h-[90vh]">
+            <div class="text-center border-b border-gray-100 pb-3">
+                <h3 class="text-lg font-bold text-gray-800">画像をコピー</h3>
+                <p class="text-sm text-gray-500 mt-1 leading-relaxed">
+                    下の画像を <span class="font-bold text-blue-600">右クリック</span> して<br>
+                    「画像をコピー」を選択してください。
+                </p>
+            </div>
+            
+            <!-- Image Container -->
+            <div class="bg-gray-100 rounded-lg p-2 flex justify-center overflow-auto border border-gray-200 flex-1 relative min-h-[200px] flex items-center">
+                <div class="absolute inset-0 pattern-bg opacity-50"></div>
+                <img id="modal-img" src="" class="max-h-full max-w-full object-contain shadow-md bg-white relative z-10" alt="Generated Image">
+            </div>
+
+            <div class="flex justify-between items-center pt-2 border-t border-gray-100">
+                <span class="text-xs text-gray-400">Image Preview</span>
+                <div class="flex gap-2">
+                    <button onclick="closeCopyModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition font-medium">閉じる</button>
+                    <button onclick="downloadFromModal()" class="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-sm transition flex items-center gap-2 font-medium">
+                        <i class="fa-solid fa-download"></i>
+                        <span>ファイル保存</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-gray-800 text-white px-4 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-2 z-[110] pointer-events-none">
+        <i class="fa-solid fa-check-circle text-green-400"></i>
+        <span id="toast-msg">Copied!</span>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const COLORS = [
+            { hex: '#ef4444', name: 'Red' },   // Red-500
+            { hex: '#3b82f6', name: 'Blue' },  // Blue-500
+            { hex: '#22c55e', name: 'Green' }, // Green-500
+            { hex: '#eab308', name: 'Yellow'}, // Yellow-500
+            { hex: '#1f2937', name: 'Black' }, // Gray-800
+            { hex: '#ffffff', name: 'White' }
+        ];
+        
+        // Stroke colors includes Transparent option
+        const STROKE_COLORS = [
+            { hex: 'transparent', name: 'Transparent' },
+            ...COLORS
+        ];
+
+        // Fill colors includes Transparent option
+        const FILL_COLORS = [
+            { hex: 'transparent', name: 'Transparent' },
+            ...COLORS
+        ];
+
+        // Rotation Icon SVG (Blue)
+        const ROTATE_ICON_SVG = "data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg' fill='%233b82f6'%3E%3Cpath d='M463.5 224H472c13.3 0 24-10.7 24-24V72c0-9.7-5.8-18.5-14.8-22.2s-19.3-1.7-26.2 5.2L413.4 96.6c-87.6-86.5-228.7-86.2-315.8 1c-87.5 87.5-87.5 229.3 0 316.8s229.3 87.5 316.8 0c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0c-62.5 62.5-163.8 62.5-226.3 0s-62.5-163.8 0-226.3c62.2-62.2 162.7-62.5 225.3-1L327 183c-6.9 6.9-8.9 17.2-5.2 26.2s12.5 14.8 22.2 14.8H463.5z'/%3E%3C/svg%3E";
+        
+        // --- State ---
+        let canvas;
+        let cropRect; // A4ガイド枠
+        let currentCropMode = 'landscape'; // 'landscape', 'portrait', 'fit'
+        let currentMode = 'select'; // select, rect, circle, polygon, arrow, text, stamp
+        let currentStrokeColor = COLORS[0].hex; // Default is Red
+        let currentFillColor = 'transparent'; // Default is Transparent
+        let currentFillOpacity = 1.0; // Fill Alpha (1.0 = Opaque, 0.0 = Transparent)
+        let currentWidth = 2;
+        let currentFontSize = 24;
+        let stampCounter = 1;
+        let isDrawing = false;
+        let startPoint = { x: 0, y: 0 };
+        let activeShape = null;
+        let rotateIconImg = document.createElement('img');
+        rotateIconImg.src = ROTATE_ICON_SVG;
+        
+        // Polygon Variables
+        let polygonPoints = [];
+        let activeLine = null;
+        let activeShapePoints = []; // Visual markers for points
+
+        // Copy Drag Variables
+        let dragSource = null;
+        let dragStartState = null;
+        let isDuplicationHandled = false;
+
+        // キャンバスの基本サイズ（論理サイズ）
+        const BASE_WIDTH = 3000;
+        const BASE_HEIGHT = 2200;
+
+        // Undo History
+        let undoStack = [];
+        let isUndoing = false;
+        const MAX_HISTORY = 20;
+
+        // --- Initialization ---
+        window.onload = function() {
+            initCanvas();
+            initUI();
+            setupPasteHandler();
+            setupKeyboardShortcuts();
+            
+            // キャンバスサイズ固定化に伴い、リサイズ処理は削除または初期化のみに変更
+            updateCropRect();
+
+            // 初期表示時に画面に合わせてズームを調整
+            adjustZoomToFit();
+            
+            // パレットを閉じるためのグローバルクリックイベント
+            window.addEventListener('click', () => {
+                document.querySelectorAll('.palette-dropdown').forEach(el => el.classList.add('hidden'));
+                
+                // Close orientation dropdown too
+                const oMenu = document.getElementById('orientation-menu');
+                if (oMenu && !oMenu.classList.contains('hidden')) {
+                    oMenu.classList.add('hidden');
+                }
+            });
+            
+            saveHistory();
+        };
+
+        function setOrientation(mode) {
+            currentCropMode = mode;
+            
+            // UI更新
+            const btnL = document.getElementById('btn-landscape');
+            const btnP = document.getElementById('btn-portrait');
+            const btnF = document.getElementById('btn-fit');
+
+            const resetBtn = (btn) => {
+                btn.classList.remove('text-blue-600', 'bg-white', 'shadow-sm');
+                btn.classList.add('text-gray-500', 'hover:bg-white/50');
+            };
+            const activeBtn = (btn) => {
+                btn.classList.add('text-blue-600', 'bg-white', 'shadow-sm');
+                btn.classList.remove('text-gray-500', 'hover:bg-white/50');
+            };
+
+            // Reset all
+            resetBtn(btnL);
+            resetBtn(btnP);
+            resetBtn(btnF);
+
+            // Activate specific
+            if (mode === 'landscape') activeBtn(btnL);
+            else if (mode === 'portrait') activeBtn(btnP);
+            else if (mode === 'fit') activeBtn(btnF);
+
+            // Mobile UI Update
+            const label = document.getElementById('orientation-label');
+            if(label) {
+                if (mode === 'landscape') {
+                    label.innerHTML = '<i class="fa-regular fa-file fa-rotate-90"></i> 横';
+                } else if (mode === 'portrait') {
+                    label.innerHTML = '<i class="fa-regular fa-file"></i> 縦';
+                } else if (mode === 'fit') {
+                    label.innerHTML = '<i class="fa-solid fa-crop-simple"></i> 自動';
+                }
+            }
+            
+            // Close dropdown if open
+            const menu = document.getElementById('orientation-menu');
+            if(menu) menu.classList.add('hidden');
+
+            updateCropRect();
+            adjustZoomToFit(); 
+            saveHistory();
+        }
+
+        function toggleOrientationDropdown(e) {
+            e.stopPropagation();
+            const menu = document.getElementById('orientation-menu');
+            const isHidden = menu.classList.contains('hidden');
+            
+            // Close other dropdowns (Palette)
+            document.querySelectorAll('.palette-dropdown').forEach(el => el.classList.add('hidden'));
+            
+            if (isHidden) {
+                menu.classList.remove('hidden');
+            } else {
+                menu.classList.add('hidden');
+            }
+        }
+
+        function adjustZoomToFit() {
+            const mainArea = document.getElementById('main-area');
+            if (!mainArea || !canvas) return;
+
+            // ガイド枠サイズを計算
+            const longSide = 1280;
+            const shortSide = 1280 / Math.sqrt(2); // 約905px
+            
+            let guideW, guideH;
+            
+            if (currentCropMode === 'fit') {
+                // 自動モード時は全オブジェクトのRectを取得してズーム合わせる
+                // 何もないときはLandscape扱い
+                const rect = getContentRect();
+                guideW = rect.width;
+                guideH = rect.height;
+                // コンテンツが極端に小さい/大きい場合の補正はここではしないが、
+                // 最低限の表示領域を確保
+                if (guideW < 100) guideW = 100;
+                if (guideH < 100) guideH = 100;
+            } else if (currentCropMode === 'portrait') {
+                guideW = shortSide;
+                guideH = longSide;
+            } else {
+                // landscape
+                guideW = longSide;
+                guideH = shortSide;
+            }
+
+            const padding = 60; // ガイド枠の周りの余白
+
+            const availableW = mainArea.clientWidth;
+            const availableH = mainArea.clientHeight;
+
+            // ガイド枠＋余白が画面に収まるための倍率を計算
+            let scaleX = availableW / (guideW + padding);
+            let scaleY = availableH / (guideH + padding);
+            let scale = Math.min(scaleX, scaleY);
+            
+            // 極端に小さくなりすぎないよう制限しつつ、最大でも1.0（等倍）とする
+            scale = Math.min(Math.max(scale, 0.2), 1.0);
+
+            // ズーム適用
+            setCanvasZoom(scale);
+
+            // 適用後に中央へスクロール
+            // 描画更新を待つために少し遅延させる
+            setTimeout(centerScrollView, 50);
+        }
+
+        function setCanvasZoom(scale) {
+            if (!canvas) return;
+            
+            // Fabric.jsのズーム設定（描画倍率）
+            canvas.setZoom(scale);
+            
+            // キャンバス要素自体のサイズも変更して、スクロール領域全体を調整
+            const newWidth = BASE_WIDTH * scale;
+            const newHeight = BASE_HEIGHT * scale;
+            
+            canvas.setWidth(newWidth);
+            canvas.setHeight(newHeight);
+            
+            // ラッパーのサイズも合わせる
+            const wrapper = document.getElementById('canvas-wrapper');
+            if(wrapper) {
+                wrapper.style.width = newWidth + 'px';
+                wrapper.style.height = newHeight + 'px';
+            }
+            
+            canvas.requestRenderAll();
+        }
+
+        function centerScrollView() {
+            const mainArea = document.getElementById('main-area');
+            const wrapper = document.getElementById('canvas-wrapper');
+            if (mainArea && wrapper) {
+                // スクロール位置を中心へ
+                mainArea.scrollLeft = (wrapper.offsetWidth - mainArea.clientWidth) / 2;
+                mainArea.scrollTop = (wrapper.offsetHeight - mainArea.clientHeight) / 2;
+            }
+        }
+
+        function resizeCanvasToWindow() {
+            // 固定サイズ運用のため、ウィンドウリサイズ時のキャンバスサイズ変更は行わない
+        }
+
+        function initCanvas() {
+            canvas = new fabric.Canvas('c', {
+                isDrawingMode: false,
+                selection: true,
+                preserveObjectStacking: true,
+                // 初期サイズ
+                width: BASE_WIDTH,
+                height: BASE_HEIGHT,
+                // 背景色を透明にして、CSSの市松模様が見えるようにする
+                backgroundColor: null 
+            });
+
+            // カスタム回転ハンドルのレンダリング関数
+            function renderRotateControl(ctx, left, top, styleOverride, fabricObject) {
+                const size = 30;
+                ctx.save();
+                ctx.translate(left, top);
+                ctx.rotate(fabric.util.degreesToRadians(fabricObject.angle));
+                
+                // アイコン描画
+                ctx.drawImage(rotateIconImg, -size/2, -size/2, size, size);
+                
+                // 接続線を手動で描画
+                ctx.beginPath();
+                ctx.moveTo(0, 0); 
+                ctx.lineTo(0, size); 
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+
+            // 標準コントロールの上書き
+            fabric.Object.prototype.controls.mtr = new fabric.Control({
+                x: 0,
+                y: -0.5,
+                offsetY: -40,
+                cursorStyle: 'crosshair', 
+                actionHandler: fabric.controlsUtils.rotationWithSnapping,
+                actionName: 'rotate',
+                render: renderRotateControl,
+                withConnection: false
+            });
+
+            fabric.Object.prototype.snapAngle = 15;
+
+            fabric.Object.prototype.set({
+                transparentCorners: false,
+                cornerColor: '#ffffff',
+                cornerStrokeColor: '#3b82f6',
+                borderColor: '#3b82f6',
+                cornerSize: 10,
+                padding: 5,
+                cornerStyle: 'circle',
+                hasRotatingPoint: true
+            });
+
+            // Ctrl + Wheel Zoom
+            canvas.on('mouse:wheel', function(opt) {
+                if (opt.e.ctrlKey) {
+                    opt.e.preventDefault();
+                    opt.e.stopPropagation();
+
+                    const delta = opt.e.deltaY;
+                    let zoom = canvas.getZoom();
+                    
+                    // ズーム倍率の変更
+                    zoom *= 0.999 ** delta;
+                    
+                    // 制限 (0.1倍 ～ 5倍)
+                    if (zoom > 5) zoom = 5;
+                    if (zoom < 0.1) zoom = 0.1;
+
+                    // マウス位置を中心にズームするためのスクロール位置計算
+                    const mainArea = document.getElementById('main-area');
+                    const rect = mainArea.getBoundingClientRect();
+                    
+                    // マウスのビューポート上の位置
+                    const mouseX = opt.e.clientX - rect.left;
+                    const mouseY = opt.e.clientY - rect.top;
+                    
+                    // 現在のスクロール位置
+                    const currentScrollLeft = mainArea.scrollLeft;
+                    const currentScrollTop = mainArea.scrollTop;
+                    
+                    // キャンバス上の絶対位置（現在のスクロール + マウス位置）
+                    const canvasX = mouseX + currentScrollLeft;
+                    const canvasY = mouseY + currentScrollTop;
+                    
+                    const currentZoom = canvas.getZoom();
+                    
+                    // ズーム実行
+                    setCanvasZoom(zoom);
+                    
+                    // 新しいスクロール位置を計算して適用
+                    const newScrollLeft = (canvasX / currentZoom) * zoom - mouseX;
+                    const newScrollTop = (canvasY / currentZoom) * zoom - mouseY;
+                    
+                    mainArea.scrollLeft = newScrollLeft;
+                    mainArea.scrollTop = newScrollTop;
+                }
+            });
+
+            canvas.on('mouse:down', onMouseDown);
+            canvas.on('mouse:move', onMouseMove);
+            canvas.on('mouse:up', onMouseUp);
+            canvas.on('mouse:dblclick', onDoubleClick); // ダブルクリックイベント追加
+            
+            // ドラッグ中の複製ロジックのためにイベント追加
+            canvas.on('object:moving', onObjectMoving);
+
+            canvas.on('selection:created', (e) => {
+                updateControlsFromSelection(e);
+            });
+            canvas.on('selection:updated', (e) => {
+                updateControlsFromSelection(e);
+            });
+            canvas.on('selection:cleared', () => {
+                updatePaletteUI();
+            });
+            
+            canvas.on('object:added', function(e) {
+                if(cropRect && e.target !== cropRect) {
+                    canvas.bringToFront(cropRect);
+                }
+            });
+
+            // History Listeners
+            canvas.on('object:added', (e) => {
+                // Ignore polygon temp parts from history
+                if(e.target && (e.target.id === 'poly-point' || e.target.id === 'poly-line' || e.target.id === 'poly-active-line')) return;
+                saveHistory();
+            });
+            canvas.on('object:modified', () => {
+                saveHistory();
+            });
+            canvas.on('object:removed', (e) => {
+                // Ignore polygon temp parts from history
+                if(e.target && (e.target.id === 'poly-point' || e.target.id === 'poly-line' || e.target.id === 'poly-active-line')) return;
+                saveHistory();
+            });
+        }
+
+        function updateCropRect() {
+            if (!canvas) return;
+
+            // ガイド枠自体の作成（初回のみ）
+            if (!cropRect) {
+                cropRect = new fabric.Rect({
+                    fill: 'transparent',
+                    stroke: '#2563eb',
+                    strokeWidth: 2,
+                    strokeDashArray: [10, 5],
+                    selectable: false,
+                    evented: false,
+                    lockMovementX: true,
+                    lockMovementY: true,
+                    lockRotation: true,
+                    lockScalingX: true,
+                    lockScalingY: true,
+                    visible: true,
+                    id: 'crop-rect'
+                });
+                canvas.add(cropRect);
+            }
+
+            // fitモードなら非表示にして終了
+            if (currentCropMode === 'fit') {
+                cropRect.visible = false;
+                canvas.requestRenderAll();
+                return;
+            }
+
+            cropRect.visible = true;
+
+            // A4サイズの定義
+            const longSide = 1280;
+            const shortSide = 1280 / Math.sqrt(2); // 約905px
+            
+            let frameW, frameH;
+            if (currentCropMode === 'portrait') {
+                frameW = shortSide;
+                frameH = longSide;
+            } else {
+                // landscape
+                frameW = longSide;
+                frameH = shortSide;
+            }
+            
+            // 固定キャンバスの中心に配置
+            const left = (BASE_WIDTH - frameW) / 2;
+            const top = (BASE_HEIGHT - frameH) / 2;
+
+            cropRect.set({
+                left: left,
+                top: top,
+                width: frameW,
+                height: frameH
+            });
+            cropRect.setCoords();
+            canvas.bringToFront(cropRect);
+            canvas.requestRenderAll();
+        }
+
+        function getContentRect() {
+            // cropRectと非表示オブジェクトを除外
+            const objects = canvas.getObjects().filter(o => o !== cropRect && o.visible && o.id !== 'poly-point' && o.id !== 'poly-line' && o.id !== 'poly-active-line');
+            
+            if (objects.length === 0) {
+                // オブジェクトがない場合は、とりあえずLandscapeのサイズを返す
+                const longSide = 1280;
+                const shortSide = 1280 / Math.sqrt(2);
+                const left = (BASE_WIDTH - longSide) / 2;
+                const top = (BASE_HEIGHT - shortSide) / 2;
+                return { left, top, width: longSide, height: shortSide };
+            }
+            
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            
+            objects.forEach(o => {
+                const rect = o.getBoundingRect();
+                if (rect.left < minX) minX = rect.left;
+                if (rect.top < minY) minY = rect.top;
+                if (rect.left + rect.width > maxX) maxX = rect.left + rect.width;
+                if (rect.top + rect.height > maxY) maxY = rect.top + rect.height;
+            });
+            
+            return {
+                left: minX,
+                top: minY,
+                width: maxX - minX,
+                height: maxY - minY
+            };
+        }
+
+        function saveHistory() {
+            if (isUndoing) return; 
+            
+            const json = JSON.stringify(canvas.toJSON(['id', 'backgroundColor']));
+            
+            if (undoStack.length > 0 && undoStack[undoStack.length - 1] === json) {
+                return;
+            }
+            
+            undoStack.push(json);
+            
+            if (undoStack.length > MAX_HISTORY) {
+                undoStack.shift();
+            }
+        }
+
+        function undo() {
+            if (undoStack.length <= 1) return;
+
+            isUndoing = true;
+            
+            undoStack.pop(); 
+            const prevState = undoStack[undoStack.length - 1];
+            
+            canvas.loadFromJSON(prevState, function() {
+                const restoredCropRect = canvas.getObjects().find(o => o.id === 'crop-rect');
+                if (restoredCropRect) {
+                    cropRect = restoredCropRect;
+                    cropRect.set({
+                        selectable: false,
+                        evented: false
+                    });
+                } else {
+                    cropRect = null;
+                }
+
+                // キャンバスサイズは固定なのでリサイズ不要
+                updateCropRect(); // ガイド枠の再確認
+                
+                setMode(currentMode);
+
+                canvas.renderAll();
+                isUndoing = false;
+            });
+        }
+
+        // --- Color Dropdown Logic ---
+        function initColorDropdown(containerId, colors, onSelect, initialColor, options = {}) { // Added options
+            const container = document.getElementById(containerId);
+            container.innerHTML = ''; // Clear
+
+            // Trigger Button
+            const trigger = document.createElement('button');
+            trigger.className = 'w-6 h-6 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
+            updateColorDisplay(trigger, initialColor);
+            
+            // Dropdown
+            const dropdown = document.createElement('div');
+            // Fixed positioning to escape overflow hidden containers
+            dropdown.className = 'palette-dropdown fixed p-2 bg-white rounded-lg shadow-xl border border-gray-200 grid grid-cols-4 gap-2 hidden z-[100] w-max';
+            
+            colors.forEach(color => {
+                const dot = document.createElement('div');
+                dot.className = 'color-dot';
+                
+                if (color.hex === 'transparent') {
+                    dot.classList.add('transparent-pattern');
+                    dot.title = "透明";
+                } else {
+                    dot.style.backgroundColor = color.hex;
+                }
+                
+                dot.onclick = (e) => {
+                    e.stopPropagation();
+                    onSelect(color.hex);
+                    updateColorDisplay(trigger, color.hex);
+                    // dropdown.classList.add('hidden'); // Removed based on user request
+                };
+                dropdown.appendChild(dot);
+            });
+
+            // --- Opacity Slider (Modified) ---
+            if (options.hasOpacity) {
+                const divider = document.createElement('div');
+                divider.className = 'col-span-4 h-px bg-gray-200 my-1';
+                dropdown.appendChild(divider);
+
+                const sliderContainer = document.createElement('div');
+                sliderContainer.className = 'col-span-4 px-1 flex flex-col gap-1';
+                
+                const label = document.createElement('div');
+                label.className = 'flex justify-between text-xs text-gray-500';
+                
+                // Alpha (0.0-1.0) を Transparency (0%-100%) に変換
+                const initialAlpha = options.initialOpacity !== undefined ? options.initialOpacity : 1;
+                const initialTransparency = 1 - initialAlpha;
+                const percent = Math.round(initialTransparency * 100);
+                
+                label.innerHTML = '<span>透明度</span><span id="fill-opacity-val">' + percent + '%</span>';
+                sliderContainer.appendChild(label);
+
+                const slider = document.createElement('input');
+                slider.type = 'range';
+                slider.min = '0';
+                slider.max = '1';
+                slider.step = '0.05';
+                slider.value = initialTransparency; 
+                slider.className = 'w-full accent-blue-600 h-2 cursor-pointer';
+                slider.id = 'fill-opacity-slider'; // ID for updates
+
+                slider.oninput = (e) => {
+                    e.stopPropagation(); 
+                    const transparencyVal = parseFloat(e.target.value);
+                    document.getElementById('fill-opacity-val').innerText = Math.round(transparencyVal * 100) + '%';
+                    
+                    // Transparency -> Alpha に戻す
+                    const alphaVal = 1 - transparencyVal;
+                    if (options.onOpacityChange) options.onOpacityChange(alphaVal);
+                };
+                
+                slider.onclick = (e) => e.stopPropagation();
+
+                sliderContainer.appendChild(slider);
+                dropdown.appendChild(sliderContainer);
+            }
+
+            trigger.onclick = (e) => {
+                e.stopPropagation();
+                
+                const isHidden = dropdown.classList.contains('hidden');
+
+                // Close other dropdowns
+                document.querySelectorAll('.palette-dropdown').forEach(el => {
+                    if (el !== dropdown) el.classList.add('hidden');
+                });
+                
+                if (isHidden) {
+                    // 表示処理
+                    dropdown.classList.remove('hidden');
+                    
+                    // Update slider value if it exists (for fresh open)
+                    if (options.hasOpacity) {
+                        const slider = document.getElementById('fill-opacity-slider');
+                        const valLabel = document.getElementById('fill-opacity-val');
+                        if (slider) {
+                            // Current Alpha -> Transparency
+                            const currentTransparency = 1 - currentFillOpacity;
+                            slider.value = currentTransparency;
+                            valLabel.innerText = Math.round(currentTransparency * 100) + '%';
+                        }
+                    }
+
+                    // ボタンの位置を取得して、ドロップダウンの表示位置を計算
+                    const rect = trigger.getBoundingClientRect();
+                    
+                    // ボタンの真下に表示
+                    dropdown.style.top = (rect.bottom + 8) + 'px';
+                    dropdown.style.left = rect.left + 'px';
+                } else {
+                    dropdown.classList.add('hidden');
+                }
+            };
+
+            // コンテナにはトリガーボタンを追加
+            container.appendChild(trigger);
+            // ドロップダウン本体はbody直下に追加して、overflowの影響を回避
+            document.body.appendChild(dropdown);
+        }
+
+        function updateColorDisplay(el, color) {
+            // Fabric.jsのColorオブジェクトを使って正規化
+            let isTransparent = (color === 'transparent');
+            
+            if (isTransparent) {
+                el.style.backgroundColor = '';
+                el.classList.add('transparent-pattern');
+            } else {
+                el.classList.remove('transparent-pattern');
+                el.style.backgroundColor = color;
+            }
+        }
+
+        function initUI() {
+            // Init Stroke Dropdown
+            initColorDropdown('stroke-palette', STROKE_COLORS, (hex) => {
+                setStrokeColor(hex);
+            }, currentStrokeColor);
+
+            // Init Fill Dropdown with Opacity
+            initColorDropdown('fill-palette', FILL_COLORS, (hex) => {
+                setFillColor(hex);
+            }, currentFillColor, {
+                hasOpacity: true,
+                initialOpacity: currentFillOpacity, // Default 1.0
+                onOpacityChange: (val) => {
+                    currentFillOpacity = val;
+                    updateActiveObjectStyle();
+                }
+            });
+
+            const widthSlider = document.getElementById('width-slider');
+            const widthValue = document.getElementById('width-value');
+            widthSlider.addEventListener('input', (e) => {
+                currentWidth = parseInt(e.target.value, 10);
+                widthValue.innerText = currentWidth;
+                updateActiveObjectStyle();
+            });
+
+            const fontSlider = document.getElementById('font-slider');
+            const fontValue = document.getElementById('font-value');
+            fontSlider.addEventListener('input', (e) => {
+                currentFontSize = parseInt(e.target.value, 10);
+                fontValue.innerText = currentFontSize;
+                updateActiveObjectStyle();
+            });
+        }
+
+        function setMode(mode) {
+            // Cancel polygon if currently drawing
+            if (currentMode === 'polygon' && mode !== 'polygon') {
+                resetPolygonMode();
+            }
+
+            currentMode = mode;
+            
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            const targetBtn = document.getElementById(`btn-${mode}`);
+            if(targetBtn) targetBtn.classList.add('active');
+
+            canvas.discardActiveObject();
+            
+            const isSelectMode = (mode === 'select');
+
+            canvas.selection = isSelectMode;
+            canvas.defaultCursor = isSelectMode ? 'default' : 'crosshair';
+
+            canvas.getObjects().forEach(obj => {
+                if (obj === cropRect) return;
+                // Polygon temp parts
+                if (obj.id === 'poly-point' || obj.id === 'poly-line' || obj.id === 'poly-active-line') return;
+
+                obj.set({
+                    selectable: isSelectMode,
+                    evented: isSelectMode 
+                });
+            });
+            
+            canvas.requestRenderAll();
+            updatePaletteUI();
+        }
+
+        function setStrokeColor(hex) {
+            currentStrokeColor = hex;
+            updateActiveObjectStyle();
+        }
+
+        function setFillColor(hex) {
+            currentFillColor = hex;
+            
+            // 色を変更したときは、透明度をデフォルトの0%（不透明）にリセットする
+            // ただし、'transparent'（塗りつぶしなし）を選択した場合は透明度100%扱いとする
+            if (hex !== 'transparent') {
+                currentFillOpacity = 1.0; // Alpha 1.0 = 不透明
+                
+                // スライダーUIを更新
+                const slider = document.getElementById('fill-opacity-slider');
+                const valLabel = document.getElementById('fill-opacity-val');
+                if (slider && valLabel) {
+                    slider.value = 0; // Transparency 0%
+                    valLabel.innerText = '0%';
+                }
+            } else {
+                currentFillOpacity = 0.0; // Alpha 0.0 = 透明
+                
+                // スライダーUIを更新
+                const slider = document.getElementById('fill-opacity-slider');
+                const valLabel = document.getElementById('fill-opacity-val');
+                if (slider && valLabel) {
+                    slider.value = 1; // Transparency 100%
+                    valLabel.innerText = '100%';
+                }
+            }
+
+            updateActiveObjectStyle();
+        }
+
+        function updatePaletteUI() {
+            // Update the trigger buttons to show current colors
+            const strokeTrigger = document.querySelector('#stroke-palette button');
+            if(strokeTrigger) updateColorDisplay(strokeTrigger, currentStrokeColor);
+
+            const fillTrigger = document.querySelector('#fill-palette button');
+            if(fillTrigger) updateColorDisplay(fillTrigger, currentFillColor);
+        }
+
+        function updateActiveObjectStyle() {
+            const activeObj = canvas.getActiveObject();
+            if (!activeObj || activeObj === cropRect) return;
+
+            // Apply Stroke
+            if (activeObj.type === 'rect' || activeObj.type === 'ellipse' || activeObj.type === 'line' || activeObj.type === 'polygon') {
+                activeObj.set({ stroke: currentStrokeColor, strokeWidth: currentWidth });
+            } else if (activeObj.type === 'arrow-group') {
+                activeObj.getObjects().forEach(obj => {
+                    if (obj.type === 'line') obj.set({ stroke: currentStrokeColor, strokeWidth: currentWidth });
+                    if (obj.type === 'triangle') obj.set({ fill: currentStrokeColor }); // 矢印の頭はStroke扱い
+                });
+            } else if (activeObj.type === 'i-text') {
+                // Text background needs opacity handling too
+                let bgFill = currentFillColor;
+                if (bgFill !== 'transparent') {
+                    bgFill = new fabric.Color(bgFill).setAlpha(currentFillOpacity).toRgba();
+                }
+
+                activeObj.set({ 
+                    fill: currentStrokeColor, 
+                    fontSize: currentFontSize,
+                    backgroundColor: bgFill 
+                });
+            } else if (activeObj.type === 'group' && activeObj.getObjects().some(o => o.type === 'text')) {
+                 // Stamp
+                 const circle = activeObj.item(0);
+                 const text = activeObj.item(1);
+                 circle.set({ stroke: currentStrokeColor });
+                 text.set({ fill: currentStrokeColor });
+                 
+                 const baseSize = 18; 
+                 const newScale = currentFontSize / baseSize;
+                 activeObj.set({ scaleX: newScale, scaleY: newScale });
+                 activeObj.setCoords();
+            }
+
+            // Apply Fill
+            let fillVal = currentFillColor;
+            if (fillVal !== 'transparent') {
+                fillVal = new fabric.Color(fillVal).setAlpha(currentFillOpacity).toRgba();
+            }
+
+            if (activeObj.type === 'rect' || activeObj.type === 'ellipse' || activeObj.type === 'polygon') {
+                activeObj.set({ fill: fillVal });
+            } else if (activeObj.type === 'group' && activeObj.getObjects().some(o => o.type === 'text')) {
+                // Stamp Fill
+                const circle = activeObj.item(0);
+                circle.set({ fill: fillVal });
+            }
+
+            canvas.requestRenderAll();
+        }
+
+        function updateControlsFromSelection() {
+            const activeObj = canvas.getActiveObject();
+            if (!activeObj || activeObj === cropRect) return;
+
+            if (activeObj.type === 'image') return; // 画像選択時は色を同期しない
+
+            // --- Update Sliders ---
+            if (activeObj.type === 'i-text') {
+                const size = activeObj.fontSize;
+                document.getElementById('font-slider').value = size;
+                document.getElementById('font-value').innerText = size;
+                currentFontSize = size;
+            } else if (activeObj.strokeWidth) {
+                const width = activeObj.strokeWidth;
+                document.getElementById('width-slider').value = width;
+                document.getElementById('width-value').innerText = width;
+                currentWidth = width;
+            } else if (activeObj.type === 'group' && activeObj.getObjects().some(o => o.type === 'text')) {
+                const baseSize = 18;
+                const size = Math.round(activeObj.scaleX * baseSize);
+                const fontSlider = document.getElementById('font-slider');
+                const fontValue = document.getElementById('font-value');
+                if(fontSlider && fontValue) {
+                    fontSlider.value = size;
+                    fontValue.innerText = size;
+                    currentFontSize = size;
+                }
+            }
+            
+            // --- Update Stroke Color ---
+            let sColor = null;
+            if (activeObj.stroke) sColor = activeObj.stroke;
+            else if (activeObj.fill && activeObj.type === 'i-text') sColor = activeObj.fill;
+            else if (activeObj.type === 'arrow-group') {
+                sColor = activeObj.item(1).fill;
+            } else if (activeObj.type === 'group') {
+                sColor = activeObj.item(0).stroke; 
+            }
+
+            if(sColor && typeof sColor === 'string') {
+                currentStrokeColor = sColor;
+            }
+
+            // --- Update Fill Color & Opacity ---
+            let fColor = null;
+            if (activeObj.type === 'rect' || activeObj.type === 'ellipse' || activeObj.type === 'polygon') {
+                fColor = activeObj.fill;
+            } else if (activeObj.type === 'group' && activeObj.getObjects().some(o => o.type === 'text')) {
+                fColor = activeObj.item(0).fill;
+            } else if (activeObj.type === 'i-text') {
+                fColor = activeObj.backgroundColor || 'transparent';
+            }
+
+            if (fColor) {
+                if (fColor === 'transparent') {
+                    currentFillColor = 'transparent';
+                    // 透明の場合は Alpha 0 (Transparency 100%) とみなす
+                    currentFillOpacity = 0;
+                } else {
+                    const c = new fabric.Color(fColor);
+                    currentFillOpacity = c.getAlpha();
+                    if (currentFillOpacity === 0) {
+                         currentFillColor = 'transparent';
+                    } else {
+                        currentFillColor = '#' + c.toHex();
+                    }
+                }
+                
+                // Update slider UI if exists
+                const slider = document.getElementById('fill-opacity-slider');
+                const valLabel = document.getElementById('fill-opacity-val');
+                if (slider) {
+                    // Alpha -> Transparency
+                    const transparency = 1 - currentFillOpacity;
+                    slider.value = transparency;
+                    valLabel.innerText = Math.round(transparency * 100) + '%';
+                }
+            } 
+
+            updatePaletteUI();
+        }
+
+        // --- Event Handlers ---
+        
+        function onMouseDown(o) {
+            // Select Mode Logic including Duplication
+            if (currentMode === 'select' && o.target && o.target !== cropRect) {
+                dragSource = o.target;
+                // 複製用に初期状態を保存
+                dragStartState = {
+                    left: dragSource.left,
+                    top: dragSource.top,
+                    angle: dragSource.angle,
+                    scaleX: dragSource.scaleX,
+                    scaleY: dragSource.scaleY,
+                    skewX: dragSource.skewX,
+                    skewY: dragSource.skewY,
+                    flipX: dragSource.flipX,
+                    flipY: dragSource.flipY
+                };
+                isDuplicationHandled = false;
+
+                // 最初からCtrlが押されている場合
+                if (o.e.ctrlKey || o.e.metaKey) {
+                    duplicateAtStart();
+                }
+                return;
+            }
+
+            if(currentMode !== 'select') {
+                canvas.discardActiveObject();
+            }
+
+            const pointer = canvas.getPointer(o.e);
+            
+            // Polygon Logic
+            if (currentMode === 'polygon') {
+                isDrawing = true;
+                // Add Point
+                polygonPoints.push({ x: pointer.x, y: pointer.y });
+                
+                // Visual Marker
+                const points = [pointer.x, pointer.y, pointer.x, pointer.y];
+                const marker = new fabric.Circle({
+                    radius: 3,
+                    fill: currentStrokeColor,
+                    stroke: currentStrokeColor,
+                    strokeWidth: 1,
+                    left: pointer.x,
+                    top: pointer.y,
+                    originX: 'center',
+                    originY: 'center',
+                    selectable: false,
+                    evented: false,
+                    id: 'poly-point'
+                });
+                canvas.add(marker);
+                activeShapePoints.push(marker);
+
+                if (polygonPoints.length > 1) {
+                    // Make the previous line permanent
+                    const start = polygonPoints[polygonPoints.length - 2];
+                    const end = polygonPoints[polygonPoints.length - 1];
+                    const line = new fabric.Line([start.x, start.y, end.x, end.y], {
+                        strokeWidth: currentWidth,
+                        stroke: currentStrokeColor,
+                        selectable: false,
+                        evented: false,
+                        id: 'poly-line'
+                    });
+                    canvas.add(line);
+                }
+
+                // Update active line start position
+                if(activeLine) {
+                    canvas.remove(activeLine);
+                }
+                activeLine = new fabric.Line([pointer.x, pointer.y, pointer.x, pointer.y], {
+                    strokeWidth: currentWidth,
+                    stroke: currentStrokeColor,
+                    strokeDashArray: [5, 5], // Dashed line for preview
+                    selectable: false,
+                    evented: false,
+                    id: 'poly-active-line'
+                });
+                canvas.add(activeLine);
+                
+                return; // Stop here for polygon, don't run other shape logic
+            }
+
+            isDrawing = true;
+            startPoint = { x: pointer.x, y: pointer.y };
+
+            // Construct fill with opacity
+            let fillVal = currentFillColor;
+            if (fillVal !== 'transparent') {
+                fillVal = new fabric.Color(fillVal).setAlpha(currentFillOpacity).toRgba();
+            }
+
+            switch (currentMode) {
+                case 'rect':
+                    activeShape = new fabric.Rect({
+                        left: startPoint.x,
+                        top: startPoint.y,
+                        originX: 'left',
+                        originY: 'top',
+                        width: 0,
+                        height: 0,
+                        fill: fillVal, 
+                        stroke: currentStrokeColor, 
+                        strokeWidth: currentWidth,
+                        selectable: false,
+                        evented: false
+                    });
+                    canvas.add(activeShape);
+                    break;
+                case 'circle':
+                    activeShape = new fabric.Ellipse({
+                        left: startPoint.x,
+                        top: startPoint.y,
+                        originX: 'left',
+                        originY: 'top',
+                        rx: 0,
+                        ry: 0,
+                        fill: fillVal, 
+                        stroke: currentStrokeColor, 
+                        strokeWidth: currentWidth,
+                        selectable: false,
+                        evented: false
+                    });
+                    canvas.add(activeShape);
+                    break;
+                case 'arrow':
+                    const points = [startPoint.x, startPoint.y, startPoint.x, startPoint.y];
+                    activeShape = new fabric.Line(points, {
+                        strokeWidth: currentWidth,
+                        stroke: currentStrokeColor, // Stroke Only
+                        originX: 'center',
+                        originY: 'center',
+                        selectable: false,
+                        evented: false
+                    });
+                    canvas.add(activeShape);
+                    break;
+            }
+        }
+
+        // --- Duplication Logic ---
+        function duplicateAtStart() {
+            if (!dragSource || isDuplicationHandled) return;
+            isDuplicationHandled = true; // Mark as handled
+
+            // Clone and leave at original position (behind)
+            createClone(dragSource, null); 
+        }
+
+        function onObjectMoving(opt) {
+            // If dragging, not yet duplicated, and Ctrl is pressed now
+            if (currentMode === 'select' && dragSource && !isDuplicationHandled) {
+                if (opt.e.ctrlKey || opt.e.metaKey) {
+                    isDuplicationHandled = true;
+                    // Create clone at initial position
+                    createClone(dragSource, dragStartState);
+                }
+            }
+        }
+
+        function createClone(targetObj, stateToSet) {
+             targetObj.clone(function(cloned) {
+                if (stateToSet) {
+                    cloned.set(stateToSet);
+                }
+
+                if (cloned.type === 'activeSelection') {
+                    cloned.canvas = canvas;
+                    cloned.forEachObject(function(obj) {
+                        canvas.add(obj);
+                        // canvas.sendToBack(obj); // 削除: 最背面に行かないようにする
+                    });
+                    cloned.setCoords();
+                } else {
+                    canvas.add(cloned);
+                    // canvas.sendToBack(cloned); // 削除: 最背面に行かないようにする
+                }
+                
+                // Bring current dragging object to front
+                targetObj.bringToFront();
+                if(cropRect) canvas.bringToFront(cropRect);
+                
+                saveHistory();
+            });
+        }
+
+        function onMouseMove(o) {
+            const pointer = canvas.getPointer(o.e);
+
+            if (currentMode === 'polygon') {
+                if (activeLine && isDrawing) {
+                    activeLine.set({ x2: pointer.x, y2: pointer.y });
+                    canvas.requestRenderAll();
+                }
+                return;
+            }
+
+            if (!isDrawing || !activeShape) return;
+
+            if (currentMode === 'rect') {
+                if(startPoint.x > pointer.x){
+                    activeShape.set({ left: pointer.x }); 
+                }
+                if(startPoint.y > pointer.y){
+                    activeShape.set({ top: pointer.y });
+                }
+                activeShape.set({
+                    width: Math.abs(startPoint.x - pointer.x),
+                    height: Math.abs(startPoint.y - pointer.y)
+                });
+            } else if (currentMode === 'circle') {
+                if(startPoint.x > pointer.x){
+                    activeShape.set({ left: pointer.x }); 
+                }
+                if(startPoint.y > pointer.y){
+                    activeShape.set({ top: pointer.y });
+                }
+                
+                const width = Math.abs(startPoint.x - pointer.x);
+                const height = Math.abs(startPoint.y - pointer.y);
+                
+                activeShape.set({
+                    rx: width / 2,
+                    ry: height / 2
+                });
+            } else if (currentMode === 'arrow') {
+                activeShape.set({ x2: pointer.x, y2: pointer.y });
+            }
+
+            canvas.renderAll();
+        }
+
+        function onMouseUp(o) {
+            if(currentMode === 'select') return;
+            if(currentMode === 'polygon') return; // Polygon handles its own state on click
+
+            const pointer = canvas.getPointer(o.e);
+            const isClick = Math.abs(startPoint.x - pointer.x) < 5 && Math.abs(startPoint.y - pointer.y) < 5;
+
+            if (isDrawing) {
+                if (currentMode === 'arrow') {
+                    finishArrow(activeShape);
+                } else if (currentMode === 'rect' || currentMode === 'circle') {
+                    activeShape.setCoords();
+                    saveHistory();
+                }
+            }
+
+            if (isClick) {
+                if (currentMode === 'text') {
+                    addText(pointer.x, pointer.y);
+                } else if (currentMode === 'stamp') {
+                    addStamp(pointer.x, pointer.y);
+                }
+            }
+
+            isDrawing = false;
+            activeShape = null;
+        }
+
+        function onDoubleClick(o) {
+            if (currentMode === 'polygon') {
+                finishPolygon();
+            }
+        }
+
+        // --- Polygon Logic ---
+
+        function finishPolygon() {
+            if (polygonPoints.length < 3) {
+                resetPolygonMode();
+                return;
+            }
+
+            // Remove temp visuals
+            canvas.getObjects().forEach(o => {
+                if (o.id === 'poly-point' || o.id === 'poly-line' || o.id === 'poly-active-line') {
+                    canvas.remove(o);
+                }
+            });
+
+            // Construct fill with opacity
+            let fillVal = currentFillColor;
+            if (fillVal !== 'transparent') {
+                fillVal = new fabric.Color(fillVal).setAlpha(currentFillOpacity).toRgba();
+            }
+
+            // Create Polygon
+            const polygon = new fabric.Polygon(polygonPoints, {
+                fill: fillVal,
+                stroke: currentStrokeColor,
+                strokeWidth: currentWidth,
+                objectCaching: false,
+                selectable: true
+            });
+
+            canvas.add(polygon);
+            
+            // Adjust position because Fabric centers the polygon
+            // No, actually creating with points places it relatively correctly, but let's select it.
+            canvas.setActiveObject(polygon);
+            
+            saveHistory();
+            
+            // Reset logic
+            polygonPoints = [];
+            activeLine = null;
+            activeShapePoints = [];
+            isDrawing = false;
+            
+            // Switch back to select mode? Or stay in polygon mode?
+            // Usually stay in tool mode, but reset points
+        }
+
+        function resetPolygonMode() {
+            isDrawing = false;
+            polygonPoints = [];
+            activeShapePoints = [];
+            activeLine = null;
+            // Clear temp objects
+            canvas.getObjects().forEach(o => {
+                if (o.id === 'poly-point' || o.id === 'poly-line' || o.id === 'poly-active-line') {
+                    canvas.remove(o);
+                }
+            });
+            canvas.requestRenderAll();
+        }
+
+        // --- Basic Shapes Logic ---
+
+        function addText(x, y, content = 'Text') {
+            // Text Background with opacity
+            let bgFill = currentFillColor;
+            if (bgFill !== 'transparent') {
+                bgFill = new fabric.Color(bgFill).setAlpha(currentFillOpacity).toRgba();
+            }
+
+            const text = new fabric.IText(content, {
+                left: x,
+                top: y,
+                fontFamily: 'sans-serif',
+                fill: currentStrokeColor, // 文字色はLine色
+                backgroundColor: bgFill, // 背景色はFill色
+                fontSize: currentFontSize,
+                selectable: true 
+            });
+            canvas.add(text);
+            
+            setMode('select');
+
+            canvas.setActiveObject(text);
+            text.enterEditing();
+            text.selectAll(); 
+            
+            saveHistory();
+        }
+
+        function addStamp(x, y) {
+            const baseSize = 18;
+            const scale = currentFontSize / baseSize;
+
+            let fillVal = currentFillColor;
+            if (fillVal !== 'transparent') {
+                fillVal = new fabric.Color(fillVal).setAlpha(currentFillOpacity).toRgba();
+            }
+
+            const circle = new fabric.Circle({
+                radius: 15,
+                fill: fillVal, // Use Fill Color for stamp background
+                stroke: currentStrokeColor, // Use Stroke Color for border
+                strokeWidth: 3,
+                originX: 'center',
+                originY: 'center'
+            });
+
+            const text = new fabric.Text(stampCounter.toString(), {
+                fontSize: 18,
+                fill: currentStrokeColor, // Use Stroke Color for text
+                originX: 'center',
+                originY: 'center',
+                fontWeight: 'bold',
+                fontFamily: 'sans-serif'
+            });
+
+            const group = new fabric.Group([circle, text], {
+                left: x,
+                top: y,
+                originX: 'center',
+                originY: 'center',
+                scaleX: scale,
+                scaleY: scale,
+                selectable: false,
+                evented: false
+            });
+
+            canvas.add(group);
+            stampCounter++;
+            document.querySelector('#btn-stamp div').innerText = stampCounter;
+            saveHistory();
+        }
+
+        function finishArrow(line) {
+            canvas.remove(line);
+            
+            const x1 = line.x1, y1 = line.y1, x2 = line.x2, y2 = line.y2;
+            const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+            const headSize = currentWidth * 3 + 10;
+
+            const theta = Math.atan2(y2 - y1, x2 - x1);
+            const shortenAmount = headSize * 0.85; 
+            
+            const dist = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+            
+            let lx2 = x2;
+            let ly2 = y2;
+
+            if (dist >= shortenAmount) {
+                lx2 = x2 - Math.cos(theta) * shortenAmount;
+                ly2 = y2 - Math.sin(theta) * shortenAmount;
+            } else {
+                lx2 = x1;
+                ly2 = y1;
+            }
+
+            const trueLine = new fabric.Line([x1, y1, lx2, ly2], {
+                stroke: currentStrokeColor, // Stroke Only
+                strokeWidth: currentWidth,
+                originX: 'center',
+                originY: 'center'
+            });
+
+            const head = new fabric.Triangle({
+                fill: currentStrokeColor, // Head follows Stroke color
+                width: headSize,
+                height: headSize,
+                originX: 'center',
+                originY: 'center',
+                selectable: false,
+                angle: angle + 90,
+                left: x2,
+                top: y2
+            });
+
+            const deltaX = Math.cos(angle * Math.PI / 180) * (headSize / 2);
+            const deltaY = Math.sin(angle * Math.PI / 180) * (headSize / 2);
+            head.set({ left: x2 - deltaX + (deltaX*0.2), top: y2 - deltaY + (deltaY*0.2)});
+
+            const group = new fabric.Group([trueLine, head], {
+                selectable: false,
+                evented: false,
+                type: 'arrow-group' 
+            });
+            
+            canvas.add(group);
+            saveHistory();
+        }
+
+        function bringSelectedToFront() {
+            const activeObj = canvas.getActiveObject();
+            if (!activeObj || activeObj === cropRect) return;
+            
+            activeObj.bringToFront();
+            
+            // Ensure cropRect stays on top if visible
+            if(cropRect && cropRect.visible) {
+                cropRect.bringToFront();
+            }
+            
+            saveHistory();
+        }
+
+        function sendSelectedToBack() {
+            const activeObj = canvas.getActiveObject();
+            if (!activeObj || activeObj === cropRect) return;
+            
+            activeObj.sendToBack();
+            saveHistory();
+        }
+
+        function setupPasteHandler() {
+            const handleImage = (imgObj) => {
+                const imgInstance = new fabric.Image(imgObj);
+                let targetLeft, targetTop;
+
+                if (cropRect && cropRect.visible) {
+                    const cropW = cropRect.width * cropRect.scaleX;
+                    const cropH = cropRect.height * cropRect.scaleY;
+                    
+                    if (imgInstance.width > cropW || imgInstance.height > cropH) {
+                        const scale = Math.min(cropW / imgInstance.width, cropH / imgInstance.height);
+                        imgInstance.scale(scale);
+                    }
+
+                    const center = cropRect.getCenterPoint();
+                    targetLeft = center.x - (imgInstance.getScaledWidth() / 2);
+                    targetTop = center.y - (imgInstance.getScaledHeight() / 2);
+
+                } else {
+                    const centerX = BASE_WIDTH / 2;
+                    const centerY = BASE_HEIGHT / 2;
+                    
+                    targetLeft = centerX - (imgInstance.getScaledWidth() / 2);
+                    targetTop = centerY - (imgInstance.getScaledHeight() / 2);
+                }
+
+                imgInstance.set({
+                    left: targetLeft,
+                    top: targetTop,
+                    selectable: true
+                });
+                canvas.add(imgInstance);
+                canvas.setActiveObject(imgInstance);
+                
+                setMode('select');
+                document.getElementById('empty-state').style.display = 'none';
+                
+                setTimeout(() => saveHistory(), 100);
+            };
+
+            window.addEventListener('paste', function(e) {
+                const items = Array.from(e.clipboardData.items);
+                
+                const imageItem = items.find(x => /^image\//.test(x.type));
+                if (imageItem) {
+                    const blob = imageItem.getAsFile();
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        const imgObj = new Image();
+                        imgObj.src = event.target.result;
+                        imgObj.onload = function() {
+                            handleImage(imgObj);
+                        };
+                    };
+                    reader.readAsDataURL(blob);
+                    e.preventDefault();
+                    return;
+                }
+
+                const textItem = items.find(x => x.type === 'text/plain');
+                if (textItem) {
+                    textItem.getAsString(function(text) {
+                        if (text) {
+                            const mainArea = document.getElementById('main-area');
+                            const zoom = canvas.getZoom();
+                            
+                            let x = BASE_WIDTH / 2;
+                            let y = BASE_HEIGHT / 2;
+
+                            if (mainArea) {
+                                x = (mainArea.scrollLeft + mainArea.clientWidth / 2) / zoom;
+                                y = (mainArea.scrollTop + mainArea.clientHeight / 2) / zoom;
+                            }
+
+                            addText(x, y, text);
+                            document.getElementById('empty-state').style.display = 'none';
+                        }
+                    });
+                    e.preventDefault();
+                }
+            });
+
+            const dropZone = document.body;
+            dropZone.addEventListener('dragover', e => e.preventDefault());
+            dropZone.addEventListener('drop', function(e) {
+                e.preventDefault();
+                const file = e.dataTransfer.files[0];
+                if (file && file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = function(f) {
+                        const imgObj = new Image();
+                        imgObj.src = f.target.result;
+                        imgObj.onload = function() {
+                            handleImage(imgObj);
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+        }
+
+        function setupKeyboardShortcuts() {
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                    if(canvas.getActiveObject() && !canvas.getActiveObject().isEditing) {
+                        deleteSelected();
+                    }
+                }
+                if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                    e.preventDefault();
+                    undo();
+                }
+                if (e.key === 'Enter') {
+                    if (currentMode === 'polygon') {
+                        finishPolygon();
+                    }
+                }
+            });
+        }
+
+        function deleteSelected() {
+            const activeObjects = canvas.getActiveObjects();
+            
+            if (activeObjects.length) {
+                canvas.discardActiveObject();
+                
+                activeObjects.forEach(function(object) {
+                    if (object !== cropRect) { 
+                        canvas.remove(object);
+                    }
+                });
+                
+                canvas.requestRenderAll();
+                saveHistory();
+            }
+        }
+
+        function rotateSelected() {
+            const activeObj = canvas.getActiveObject();
+            if (activeObj && activeObj !== cropRect) {
+                const currentAngle = activeObj.angle || 0;
+                activeObj.rotate(currentAngle + 90);
+                canvas.requestRenderAll();
+                saveHistory();
+            }
+        }
+
+        function showCopyModal(dataUrl) {
+            currentModalDataUrl = dataUrl;
+            const modal = document.getElementById('copy-modal');
+            const img = document.getElementById('modal-img');
+            
+            img.src = dataUrl;
+            modal.classList.remove('hidden');
+            
+            const content = modal.querySelector('div');
+            content.classList.add('modal-enter');
+            requestAnimationFrame(() => {
+                content.classList.remove('modal-enter');
+                content.classList.add('modal-enter-active');
+            });
+        }
+
+        function closeCopyModal() {
+            const modal = document.getElementById('copy-modal');
+            modal.classList.add('hidden');
+        }
+
+        function downloadFromModal() {
+            if (!currentModalDataUrl) return;
+            const link = document.createElement('a');
+            link.download = 'annotated-image.png';
+            link.href = currentModalDataUrl;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            closeCopyModal();
+            showToast('画像を保存しました', false);
+        }
+
+        async function copyToClipboard() {
+            const btn = document.getElementById('copy-btn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 生成中...';
+            
+            canvas.discardActiveObject();
+            
+            const activeGuide = canvas.getObjects().find(o => o.id === 'crop-rect');
+            if (activeGuide) activeGuide.visible = false;
+            
+            const originalZoom = canvas.getZoom();
+            const originalWidth = canvas.getWidth();
+            const originalHeight = canvas.getHeight();
+            const originalVpt = canvas.viewportTransform.slice();
+
+            canvas.setZoom(1);
+            canvas.setWidth(BASE_WIDTH);
+            canvas.setHeight(BASE_HEIGHT);
+            canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+            
+            canvas.calcOffset();
+            canvas.getObjects().forEach(obj => obj.setCoords());
+
+            canvas.requestRenderAll();
+            canvas.renderAll(); 
+
+            let cropInfo;
+            if (currentCropMode === 'fit') {
+                cropInfo = getContentRect();
+            } else if (activeGuide) {
+                cropInfo = {
+                    left: activeGuide.left,
+                    top: activeGuide.top,
+                    width: activeGuide.width * activeGuide.scaleX,
+                    height: activeGuide.height * activeGuide.scaleY
+                };
+            } else {
+                cropInfo = { left: 0, top: 0, width: BASE_WIDTH, height: BASE_HEIGHT };
+            }
+
+            const dataUrl = canvas.toDataURL({ 
+                format: 'png', 
+                multiplier: 1,
+                left: cropInfo.left,
+                top: cropInfo.top,
+                width: cropInfo.width,
+                height: cropInfo.height
+            });
+
+            canvas.setZoom(originalZoom);
+            canvas.setWidth(originalWidth);
+            canvas.setHeight(originalHeight);
+            canvas.viewportTransform = originalVpt;
+            
+            if (activeGuide && currentCropMode !== 'fit') activeGuide.visible = true;
+            
+            canvas.requestRenderAll();
+            btn.innerHTML = originalText;
+
+            try {
+                // dataURLをBlobに変換してクリップボードAPIで直接コピーを試行
+                const response = await fetch(dataUrl);
+                const blob = await response.blob();
+                const item = new ClipboardItem({ 'image/png': blob });
+                await navigator.clipboard.write([item]);
+                
+                showToast('クリップボードに画像をコピーしました');
+            } catch (error) {
+                console.warn('クリップボードへの直接コピーに失敗しました（iframeの制限等のため）。フォールバックを使用します。', error);
+                // 失敗した場合は元のモーダル(右クリック保存)を表示
+                showCopyModal(dataUrl);
+            }
+        }
+
+        function downloadImage() {
+            canvas.discardActiveObject();
+            
+            const activeGuide = canvas.getObjects().find(o => o.id === 'crop-rect');
+            if (activeGuide) activeGuide.visible = false;
+
+            const originalZoom = canvas.getZoom();
+            const originalWidth = canvas.getWidth();
+            const originalHeight = canvas.getHeight();
+            const originalVpt = canvas.viewportTransform.slice();
+
+            canvas.setZoom(1);
+            canvas.setWidth(BASE_WIDTH);
+            canvas.setHeight(BASE_HEIGHT);
+            canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+            
+            canvas.calcOffset();
+            canvas.getObjects().forEach(obj => obj.setCoords());
+
+            canvas.renderAll();
+
+            let cropInfo;
+            if (currentCropMode === 'fit') {
+                cropInfo = getContentRect();
+            } else if (activeGuide) {
+                cropInfo = {
+                    left: activeGuide.left,
+                    top: activeGuide.top,
+                    width: activeGuide.width * activeGuide.scaleX,
+                    height: activeGuide.height * activeGuide.scaleY
+                };
+            } else {
+                cropInfo = { left: 0, top: 0, width: BASE_WIDTH, height: BASE_HEIGHT };
+            }
+
+            const link = document.createElement('a');
+            link.download = 'annotated-image.png';
+            link.href = canvas.toDataURL({ 
+                format: 'png', 
+                multiplier: 1,
+                left: cropInfo.left,
+                top: cropInfo.top,
+                width: cropInfo.width,
+                height: cropInfo.height
+            });
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            canvas.setZoom(originalZoom);
+            canvas.setWidth(originalWidth);
+            canvas.setHeight(originalHeight);
+            canvas.viewportTransform = originalVpt;
+
+            if (activeGuide && currentCropMode !== 'fit') activeGuide.visible = true;
+            
+            canvas.requestRenderAll();
+        }
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            
+            const icon = toast.querySelector('i');
+            if(isError) {
+                icon.className = 'fa-solid fa-circle-exclamation text-red-400';
+            } else {
+                icon.className = 'fa-solid fa-check-circle text-green-400';
+            }
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
