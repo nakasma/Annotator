@@ -17,6 +17,24 @@
             }
             originalWarn.apply(console, args);
         };
+
+        // Canvas API の textBaseline への不正な値 'alphabetical' の代入をインターセプトしてブラウザ警告を防止
+        const originalTextBaseline = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'textBaseline');
+        if (originalTextBaseline) {
+            Object.defineProperty(CanvasRenderingContext2D.prototype, 'textBaseline', {
+                get: function() {
+                    return originalTextBaseline.get ? originalTextBaseline.get.call(this) : 'alphabetic';
+                },
+                set: function(value) {
+                    if (value === 'alphabetical') {
+                        value = 'alphabetic';
+                    }
+                    if (originalTextBaseline.set) {
+                        originalTextBaseline.set.call(this, value);
+                    }
+                }
+            });
+        }
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -377,7 +395,10 @@
                 const origGetCacheCanvasDimensions = fabric.Object.prototype._getCacheCanvasDimensions;
                 fabric.Object.prototype._getCacheCanvasDimensions = function() {
                     if (!this.canvas) {
-                        this.canvas = { getRetinaScaling: () => fabric.devicePixelRatio || 1 };
+                        this.canvas = { 
+                            getRetinaScaling: () => fabric.devicePixelRatio || 1,
+                            getZoom: () => 1
+                        };
                         const res = origGetCacheCanvasDimensions.call(this);
                         delete this.canvas;
                         return res;
