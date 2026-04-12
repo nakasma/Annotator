@@ -5,35 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Annotator</title>
     <!-- 404エラーを防ぐための空のファビコン -->
-    <link rel="icon" href="data:,">
+    <link rel="icon" href="data:image/x-icon;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAFElEQVR4XgXAAQ0AAABAMP1L30IDCPwC/o5WcS4AAAAASUVORK5CYII=">
     
-    <!-- Tailwind CSS (コンソールの警告を抑止) -->
+    <!-- Tailwind CSS と Fabric.js の警告(alphabetical等)をコンソールから抑止 -->
     <script>
         const originalWarn = console.warn;
         console.warn = function(...args) {
-            if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com should not be used in production')) {
+            const msg = args.map(String).join(' ');
+            if (msg.includes('cdn.tailwindcss.com') || msg.includes('alphabetical')) {
                 return;
             }
             originalWarn.apply(console, args);
         };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- Fabric.jsにおける textBaseline 'alphabetical' 未定義エラー抑止のポリフィル -->
-    <script>
-        const originalTextBaseline = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'textBaseline');
-        if (originalTextBaseline) {
-            Object.defineProperty(CanvasRenderingContext2D.prototype, 'textBaseline', {
-                get() {
-                    return originalTextBaseline.get.call(this);
-                },
-                set(value) {
-                    if (value === 'alphabetical') value = 'alphabetic';
-                    originalTextBaseline.set.call(this, value);
-                }
-            });
-        }
-    </script>
 
     <!-- Fabric.js (Canvas Library) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
@@ -1114,7 +1099,7 @@
             // Apply Stroke
             if (activeObj.type === 'rect' || activeObj.type === 'ellipse' || activeObj.type === 'line' || activeObj.type === 'polygon') {
                 activeObj.set({ stroke: currentStrokeColor, strokeWidth: currentWidth });
-            } else if (activeObj.type === 'arrow-group') {
+            } else if (activeObj.id === 'arrow-group') {
                 activeObj.getObjects().forEach(obj => {
                     if (obj.type === 'line') obj.set({ stroke: currentStrokeColor, strokeWidth: currentWidth });
                     if (obj.type === 'triangle') obj.set({ fill: currentStrokeColor }); // 矢印の頭はStroke扱い
@@ -1194,7 +1179,7 @@
             let sColor = null;
             if (activeObj.stroke) sColor = activeObj.stroke;
             else if (activeObj.fill && activeObj.type === 'i-text') sColor = activeObj.fill;
-            else if (activeObj.type === 'arrow-group') {
+            else if (activeObj.id === 'arrow-group') {
                 sColor = activeObj.item(1).fill;
             } else if (activeObj.type === 'group') {
                 sColor = activeObj.item(0).stroke; 
@@ -1699,7 +1684,7 @@
             const group = new fabric.Group([trueLine, head], {
                 selectable: false,
                 evented: false,
-                type: 'arrow-group' 
+                id: 'arrow-group' 
             });
             
             canvas.add(group);
