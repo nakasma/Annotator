@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+</head>
+<body>
+    <canvas id="c" width="800" height="600"></canvas>
+    <script>
+        const originalError = console.error;
+        console.error = function(...args) {
+            document.body.innerHTML += '<pre id="err">' + args.join(' ') + '</pre>';
+            originalError.apply(console, args);
+        };
+        window.addEventListener('error', function(e) {
+            document.body.innerHTML += '<pre id="err">' + e.error.stack + '</pre>';
+        });
+
+        const canvas = new fabric.Canvas('c');
+        try {
+            const circle = new fabric.Circle({ radius: 15, fill: 'red' });
+            const text = new fabric.Text('1', { fontSize: 18, fill: 'black' });
+            const group = new fabric.Group([circle, text], { left: 100, top: 100 });
+            canvas.add(group);
+            
+            // test history
+            const json = JSON.stringify(canvas.toJSON(['id']));
+            canvas.loadFromJSON(json, function() {
+                document.body.innerHTML += '<div id="success">Success</div>';
+            });
+        } catch (e) {
+            console.error(e.stack);
+        }
+    </script>
+</body>
+</html>

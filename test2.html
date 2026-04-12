@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+</head>
+<body>
+    <script>
+        const originalError = console.error;
+        console.error = function(...args) {
+            document.body.innerHTML += '<pre style="color:red">[ERROR] ' + args.join(' ') + '</pre>';
+            originalError.apply(console, args);
+        };
+        window.addEventListener('error', function(e) {
+            document.body.innerHTML += '<pre style="color:red">[UNCAUGHT] ' + e.error.stack + '</pre>';
+        });
+
+        try {
+            const circle = new fabric.Circle({ radius: 15, fill: 'red' });
+            const text = new fabric.Text('1', { fontSize: 18, fill: 'black' });
+            const group = new fabric.Group([circle, text], { left: 100, top: 100 });
+            document.body.innerHTML += '<div>Group created without isAlreadyGrouped!</div>';
+        } catch(e) {
+            document.body.innerHTML += '<pre style="color:red">[CATCH Group] ' + e.message + '\n' + e.stack + '</pre>';
+        }
+    </script>
+</body>
+</html>
