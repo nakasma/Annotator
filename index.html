@@ -4,8 +4,37 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Annotator</title>
-    <!-- Tailwind CSS -->
+    <!-- 404エラーを防ぐための空のファビコン -->
+    <link rel="icon" href="data:,">
+    
+    <!-- Tailwind CSS (コンソールの警告を抑止) -->
+    <script>
+        const originalWarn = console.warn;
+        console.warn = function(...args) {
+            if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com should not be used in production')) {
+                return;
+            }
+            originalWarn.apply(console, args);
+        };
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Fabric.jsにおける textBaseline 'alphabetical' 未定義エラー抑止のポリフィル -->
+    <script>
+        const originalTextBaseline = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'textBaseline');
+        if (originalTextBaseline) {
+            Object.defineProperty(CanvasRenderingContext2D.prototype, 'textBaseline', {
+                get() {
+                    return originalTextBaseline.get.call(this);
+                },
+                set(value) {
+                    if (value === 'alphabetical') value = 'alphabetic';
+                    originalTextBaseline.set.call(this, value);
+                }
+            });
+        }
+    </script>
+
     <!-- Fabric.js (Canvas Library) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <!-- FontAwesome for Icons -->
@@ -357,6 +386,21 @@
 
         // --- Initialization ---
         window.onload = function() {
+            // Fabric.js の堅牢性を高めるパッチ:
+            // Canvas未追加状態でのキャッシュ生成時に getRetinaScaling() の未定義エラーを防ぐ
+            if (fabric && fabric.Object && fabric.Object.prototype._getCacheCanvasDimensions) {
+                const origGetCacheCanvasDimensions = fabric.Object.prototype._getCacheCanvasDimensions;
+                fabric.Object.prototype._getCacheCanvasDimensions = function() {
+                    if (!this.canvas) {
+                        this.canvas = { getRetinaScaling: () => fabric.devicePixelRatio || 1 };
+                        const res = origGetCacheCanvasDimensions.call(this);
+                        delete this.canvas;
+                        return res;
+                    }
+                    return origGetCacheCanvasDimensions.call(this);
+                };
+            }
+
             initCanvas();
             initUI();
             setupPasteHandler();
@@ -1366,20 +1410,21 @@
 
         function createClone(targetObj, stateToSet) {
              targetObj.clone(function(cloned) {
+                // 回避策: getRetinaScalingエラーを防ぐため、プロパティ操作前にcanvasを付与
+                cloned.canvas = canvas;
+
                 if (stateToSet) {
                     cloned.set(stateToSet);
                 }
 
                 if (cloned.type === 'activeSelection') {
-                    cloned.canvas = canvas;
                     cloned.forEachObject(function(obj) {
+                        obj.canvas = canvas;
                         canvas.add(obj);
-                        // canvas.sendToBack(obj); // 削除: 最背面に行かないようにする
                     });
                     cloned.setCoords();
                 } else {
                     canvas.add(cloned);
-                    // canvas.sendToBack(cloned); // 削除: 最背面に行かないようにする
                 }
                 
                 // Bring current dragging object to front
