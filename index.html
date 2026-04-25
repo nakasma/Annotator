@@ -38,8 +38,7 @@
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Fabric.js (Canvas Library) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <!-- Fabric.js v6 は ESModule として <script type="module"> 内で import する -->
     <!-- FontAwesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -325,7 +324,14 @@
         <span id="toast-msg">Copied!</span>
     </div>
 
-    <script>
+    <script type="module">
+        // --- Fabric.js v6 Imports ---
+        import {
+            Canvas, Rect, Ellipse, Circle, Line, Polygon, Triangle,
+            IText, FabricText, FabricImage, Group, FabricObject, Control,
+            Color, classRegistry, controlsUtils, util
+        } from 'https://cdn.jsdelivr.net/npm/fabric@6/+esm';
+
         // --- Configuration ---
         const COLORS = [
             { hex: '#ef4444', name: 'Red' },   // Red-500
@@ -389,34 +395,7 @@
 
         // --- Initialization ---
         window.onload = function() {
-            // Fabric.js の堅牢性を高めるパッチ:
-            // Canvas未追加状態でのキャッシュ生成や処理時に getRetinaScaling() の未定義エラーを防ぐため
-            // 処理中のみ一時的な軽量ダミーCanvasオブジェクトを提供する
-            if (fabric && fabric.Object) {
-                const patchMethods = ['_getCacheCanvasDimensions', '_updateCacheCanvas', 'drawCacheOnCanvas'];
-                patchMethods.forEach(method => {
-                    if (fabric.Object.prototype[method]) {
-                        const orig = fabric.Object.prototype[method];
-                        fabric.Object.prototype[method] = function(...args) {
-                            let mocked = false;
-                            if (!this.canvas) {
-                                this.canvas = { 
-                                    getRetinaScaling: () => fabric.devicePixelRatio || 1,
-                                    getZoom: () => 1
-                                };
-                                mocked = true;
-                            }
-                            try {
-                                return orig.apply(this, args);
-                            } finally {
-                                if (mocked) {
-                                    delete this.canvas;
-                                }
-                            }
-                        };
-                    }
-                });
-            }
+            // v6ではgetRetinaScalingパッチ不要（Groupシステム書き直し済み）
 
             initCanvas();
             initUI();
@@ -594,7 +573,7 @@
         }
 
         function initCanvas() {
-            canvas = new fabric.Canvas('c', {
+            canvas = new Canvas('c', {
                 isDrawingMode: false,
                 selection: true,
                 preserveObjectStacking: true,
@@ -610,7 +589,7 @@
                 const size = 30;
                 ctx.save();
                 ctx.translate(left, top);
-                ctx.rotate(fabric.util.degreesToRadians(fabricObject.angle));
+                ctx.rotate(util.degreesToRadians(fabricObject.angle));
                 
                 // アイコン描画
                 ctx.drawImage(rotateIconImg, -size/2, -size/2, size, size);
@@ -626,21 +605,8 @@
                 ctx.restore();
             }
 
-            // 標準コントロールの上書き
-            fabric.Object.prototype.controls.mtr = new fabric.Control({
-                x: 0,
-                y: -0.5,
-                offsetY: -40,
-                cursorStyle: 'crosshair', 
-                actionHandler: fabric.controlsUtils.rotationWithSnapping,
-                actionName: 'rotate',
-                render: renderRotateControl,
-                withConnection: false
-            });
-
-            fabric.Object.prototype.snapAngle = 15;
-
-            fabric.Object.prototype.set({
+            // v6: ownDefaults でグローバルデフォルトを設定
+            Object.assign(FabricObject.ownDefaults, {
                 transparentCorners: false,
                 cornerColor: '#ffffff',
                 cornerStrokeColor: '#3b82f6',
@@ -648,8 +614,25 @@
                 cornerSize: 10,
                 padding: 5,
                 cornerStyle: 'circle',
-                hasRotatingPoint: true
+                snapAngle: 15,
             });
+
+            // v6: カスタム回転コントロール
+            const origCreateControls = FabricObject.createControls;
+            FabricObject.createControls = function() {
+                const result = origCreateControls ? origCreateControls.call(this) : { controls: {} };
+                result.controls.mtr = new Control({
+                    x: 0,
+                    y: -0.5,
+                    offsetY: -40,
+                    cursorStyle: 'crosshair',
+                    actionHandler: controlsUtils.rotationWithSnapping,
+                    actionName: 'rotate',
+                    render: renderRotateControl,
+                    withConnection: false
+                });
+                return result;
+            };
 
             // Ctrl + Wheel Zoom
             canvas.on('mouse:wheel', function(opt) {
@@ -717,7 +700,7 @@
             
             canvas.on('object:added', function(e) {
                 if(cropRect && e.target !== cropRect) {
-                    canvas.bringToFront(cropRect);
+                    canvas.bringObjectToFront(cropRect);
                 }
             });
 
@@ -742,7 +725,7 @@
 
             // ガイド枠自体の作成（初回のみ）
             if (!cropRect) {
-                cropRect = new fabric.Rect({
+                cropRect = new Rect({
                     fill: 'transparent',
                     stroke: '#2563eb',
                     strokeWidth: 2,
@@ -794,7 +777,7 @@
                 height: frameH
             });
             cropRect.setCoords();
-            canvas.bringToFront(cropRect);
+            canvas.bringObjectToFront(cropRect);
             canvas.requestRenderAll();
         }
 
@@ -845,7 +828,7 @@
             }
         }
 
-        function undo() {
+        async function undo() {
             if (undoStack.length <= 1) return;
 
             isUndoing = true;
@@ -853,7 +836,8 @@
             undoStack.pop(); 
             const prevState = undoStack[undoStack.length - 1];
             
-            canvas.loadFromJSON(prevState, function() {
+            try {
+                await canvas.loadFromJSON(prevState);
                 const restoredCropRect = canvas.getObjects().find(o => o.id === 'crop-rect');
                 if (restoredCropRect) {
                     cropRect = restoredCropRect;
@@ -871,8 +855,12 @@
                 setMode(currentMode);
 
                 canvas.renderAll();
+            } catch (e) {
+                console.error('Undo復元エラー:', e);
+                showToast('復元に失敗しました', true);
+            } finally {
                 isUndoing = false;
-            });
+            }
         }
 
         // --- Color Dropdown Logic ---
@@ -999,7 +987,7 @@
         }
 
         function updateColorDisplay(el, color) {
-            // Fabric.jsのColorオブジェクトを使って正規化
+            // Colorオブジェクトを使って正規化
             let isTransparent = (color === 'transparent');
             
             if (isTransparent) {
@@ -1140,7 +1128,7 @@
                 // Text background needs opacity handling too
                 let bgFill = currentFillColor;
                 if (bgFill !== 'transparent') {
-                    bgFill = new fabric.Color(bgFill).setAlpha(currentFillOpacity).toRgba();
+                    bgFill = new Color(bgFill).setAlpha(currentFillOpacity).toRgba();
                 }
 
                 activeObj.set({ 
@@ -1164,7 +1152,7 @@
             // Apply Fill
             let fillVal = currentFillColor;
             if (fillVal !== 'transparent') {
-                fillVal = new fabric.Color(fillVal).setAlpha(currentFillOpacity).toRgba();
+                fillVal = new Color(fillVal).setAlpha(currentFillOpacity).toRgba();
             }
 
             if (activeObj.type === 'rect' || activeObj.type === 'ellipse' || activeObj.type === 'polygon') {
@@ -1237,7 +1225,7 @@
                     // 透明の場合は Alpha 0 (Transparency 100%) とみなす
                     currentFillOpacity = 0;
                 } else {
-                    const c = new fabric.Color(fColor);
+                    const c = new Color(fColor);
                     currentFillOpacity = c.getAlpha();
                     if (currentFillOpacity === 0) {
                          currentFillColor = 'transparent';
@@ -1291,7 +1279,7 @@
                 canvas.discardActiveObject();
             }
 
-            const pointer = canvas.getPointer(o.e);
+            const pointer = canvas.getScenePoint(o.e);
             
             // Polygon Logic
             if (currentMode === 'polygon') {
@@ -1301,7 +1289,7 @@
                 
                 // Visual Marker
                 const points = [pointer.x, pointer.y, pointer.x, pointer.y];
-                const marker = new fabric.Circle({
+                const marker = new Circle({
                     radius: 3,
                     fill: currentStrokeColor,
                     stroke: currentStrokeColor,
@@ -1321,7 +1309,7 @@
                     // Make the previous line permanent
                     const start = polygonPoints[polygonPoints.length - 2];
                     const end = polygonPoints[polygonPoints.length - 1];
-                    const line = new fabric.Line([start.x, start.y, end.x, end.y], {
+                    const line = new Line([start.x, start.y, end.x, end.y], {
                         strokeWidth: currentWidth,
                         stroke: currentStrokeColor,
                         selectable: false,
@@ -1335,7 +1323,7 @@
                 if(activeLine) {
                     canvas.remove(activeLine);
                 }
-                activeLine = new fabric.Line([pointer.x, pointer.y, pointer.x, pointer.y], {
+                activeLine = new Line([pointer.x, pointer.y, pointer.x, pointer.y], {
                     strokeWidth: currentWidth,
                     stroke: currentStrokeColor,
                     strokeDashArray: [5, 5], // Dashed line for preview
@@ -1354,12 +1342,12 @@
             // Construct fill with opacity
             let fillVal = currentFillColor;
             if (fillVal !== 'transparent') {
-                fillVal = new fabric.Color(fillVal).setAlpha(currentFillOpacity).toRgba();
+                fillVal = new Color(fillVal).setAlpha(currentFillOpacity).toRgba();
             }
 
             switch (currentMode) {
                 case 'rect':
-                    activeShape = new fabric.Rect({
+                    activeShape = new Rect({
                         left: startPoint.x,
                         top: startPoint.y,
                         originX: 'left',
@@ -1375,7 +1363,7 @@
                     canvas.add(activeShape);
                     break;
                 case 'circle':
-                    activeShape = new fabric.Ellipse({
+                    activeShape = new Ellipse({
                         left: startPoint.x,
                         top: startPoint.y,
                         originX: 'left',
@@ -1392,7 +1380,7 @@
                     break;
                 case 'arrow':
                     const points = [startPoint.x, startPoint.y, startPoint.x, startPoint.y];
-                    activeShape = new fabric.Line(points, {
+                    activeShape = new Line(points, {
                         strokeWidth: currentWidth,
                         stroke: currentStrokeColor, // Stroke Only
                         originX: 'center',
@@ -1425,10 +1413,9 @@
             }
         }
 
-        function createClone(targetObj, stateToSet) {
-             targetObj.clone(function(cloned) {
-                // 回避策: getRetinaScalingエラーを防ぐため、プロパティ操作前にcanvasを付与
-                cloned.canvas = canvas;
+        async function createClone(targetObj, stateToSet) {
+            try {
+                const cloned = await targetObj.clone(['id']);
 
                 if (stateToSet) {
                     cloned.set(stateToSet);
@@ -1436,7 +1423,6 @@
 
                 if (cloned.type === 'activeSelection') {
                     cloned.forEachObject(function(obj) {
-                        obj.canvas = canvas;
                         canvas.add(obj);
                     });
                     cloned.setCoords();
@@ -1445,15 +1431,17 @@
                 }
                 
                 // Bring current dragging object to front
-                targetObj.bringToFront();
-                if(cropRect) canvas.bringToFront(cropRect);
+                canvas.bringObjectToFront(targetObj);
+                if(cropRect) canvas.bringObjectToFront(cropRect);
                 
                 saveHistory();
-            });
+            } catch (e) {
+                console.error('Clone error:', e);
+            }
         }
 
         function onMouseMove(o) {
-            const pointer = canvas.getPointer(o.e);
+            const pointer = canvas.getScenePoint(o.e);
 
             if (currentMode === 'polygon') {
                 if (activeLine && isDrawing) {
@@ -1502,7 +1490,7 @@
             if(currentMode === 'select') return;
             if(currentMode === 'polygon') return; // Polygon handles its own state on click
 
-            const pointer = canvas.getPointer(o.e);
+            const pointer = canvas.getScenePoint(o.e);
             const isClick = Math.abs(startPoint.x - pointer.x) < 5 && Math.abs(startPoint.y - pointer.y) < 5;
 
             if (isDrawing) {
@@ -1550,11 +1538,11 @@
             // Construct fill with opacity
             let fillVal = currentFillColor;
             if (fillVal !== 'transparent') {
-                fillVal = new fabric.Color(fillVal).setAlpha(currentFillOpacity).toRgba();
+                fillVal = new Color(fillVal).setAlpha(currentFillOpacity).toRgba();
             }
 
             // Create Polygon
-            const polygon = new fabric.Polygon(polygonPoints, {
+            const polygon = new Polygon(polygonPoints, {
                 fill: fillVal,
                 stroke: currentStrokeColor,
                 strokeWidth: currentWidth,
@@ -1564,7 +1552,7 @@
 
             canvas.add(polygon);
             
-            // Adjust position because Fabric centers the polygon
+            // Adjust position because Fabric.js centers the polygon
             // No, actually creating with points places it relatively correctly, but let's select it.
             canvas.setActiveObject(polygon);
             
@@ -1600,10 +1588,10 @@
             // Text Background with opacity
             let bgFill = currentFillColor;
             if (bgFill !== 'transparent') {
-                bgFill = new fabric.Color(bgFill).setAlpha(currentFillOpacity).toRgba();
+                bgFill = new Color(bgFill).setAlpha(currentFillOpacity).toRgba();
             }
 
-            const text = new fabric.IText(content, {
+            const text = new IText(content, {
                 left: x,
                 top: y,
                 fontFamily: 'sans-serif',
@@ -1629,10 +1617,10 @@
 
             let fillVal = currentFillColor;
             if (fillVal !== 'transparent') {
-                fillVal = new fabric.Color(fillVal).setAlpha(currentFillOpacity).toRgba();
+                fillVal = new Color(fillVal).setAlpha(currentFillOpacity).toRgba();
             }
 
-            const circle = new fabric.Circle({
+            const circle = new Circle({
                 radius: 15,
                 fill: fillVal, // Use Fill Color for stamp background
                 stroke: currentStrokeColor, // Use Stroke Color for border
@@ -1641,7 +1629,7 @@
                 originY: 'center'
             });
 
-            const text = new fabric.Text(stampCounter.toString(), {
+            const text = new FabricText(stampCounter.toString(), {
                 fontSize: 18,
                 fill: currentStrokeColor, // Use Stroke Color for text
                 originX: 'center',
@@ -1650,7 +1638,7 @@
                 fontFamily: 'sans-serif'
             });
 
-            const group = new fabric.Group([circle, text], {
+            const group = new Group([circle, text], {
                 left: x,
                 top: y,
                 originX: 'center',
@@ -1690,14 +1678,14 @@
                 ly2 = y1;
             }
 
-            const trueLine = new fabric.Line([x1, y1, lx2, ly2], {
+            const trueLine = new Line([x1, y1, lx2, ly2], {
                 stroke: currentStrokeColor, // Stroke Only
                 strokeWidth: currentWidth,
                 originX: 'center',
                 originY: 'center'
             });
 
-            const head = new fabric.Triangle({
+            const head = new Triangle({
                 fill: currentStrokeColor, // Head follows Stroke color
                 width: headSize,
                 height: headSize,
@@ -1713,7 +1701,7 @@
             const deltaY = Math.sin(angle * Math.PI / 180) * (headSize / 2);
             head.set({ left: x2 - deltaX + (deltaX*0.2), top: y2 - deltaY + (deltaY*0.2)});
 
-            const group = new fabric.Group([trueLine, head], {
+            const group = new Group([trueLine, head], {
                 selectable: false,
                 evented: false,
                 id: 'arrow-group' 
@@ -1727,11 +1715,11 @@
             const activeObj = canvas.getActiveObject();
             if (!activeObj || activeObj === cropRect) return;
             
-            activeObj.bringToFront();
+            canvas.bringObjectToFront(activeObj);
             
             // Ensure cropRect stays on top if visible
             if(cropRect && cropRect.visible) {
-                cropRect.bringToFront();
+                canvas.bringObjectToFront(cropRect);
             }
             
             saveHistory();
@@ -1741,13 +1729,13 @@
             const activeObj = canvas.getActiveObject();
             if (!activeObj || activeObj === cropRect) return;
             
-            activeObj.sendToBack();
+            canvas.sendObjectToBack(activeObj);
             saveHistory();
         }
 
         function setupPasteHandler() {
             const handleImage = (imgObj) => {
-                const imgInstance = new fabric.Image(imgObj);
+                const imgInstance = new FabricImage(imgObj);
                 let targetLeft, targetTop;
 
                 if (cropRect && cropRect.visible) {
@@ -2074,6 +2062,20 @@
                 toast.classList.add('translate-y-20', 'opacity-0');
             }, 3000);
         }
+
+        // --- Module Scope → Global Scope ---
+        // <script type="module"> 内の関数は HTML onclick から直接呼べないため window に公開
+        window.setOrientation = setOrientation;
+        window.toggleOrientationDropdown = toggleOrientationDropdown;
+        window.setMode = setMode;
+        window.bringSelectedToFront = bringSelectedToFront;
+        window.sendSelectedToBack = sendSelectedToBack;
+        window.undo = undo;
+        window.deleteSelected = deleteSelected;
+        window.copyToClipboard = copyToClipboard;
+        window.downloadImage = downloadImage;
+        window.closeCopyModal = closeCopyModal;
+        window.downloadFromModal = downloadFromModal;
     </script>
 </body>
 </html>
