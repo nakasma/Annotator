@@ -1496,9 +1496,15 @@
             if (isDrawing) {
                 if (currentMode === 'arrow') {
                     finishArrow(activeShape);
+                    setMode('select');
                 } else if (currentMode === 'rect' || currentMode === 'circle') {
                     activeShape.setCoords();
                     saveHistory();
+                    // 描画完了後、選択モードに切り替えて配置した図形を選択状態にする
+                    const placed = activeShape;
+                    setMode('select');
+                    canvas.setActiveObject(placed);
+                    canvas.requestRenderAll();
                 }
             }
 
